@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQL Analyzer</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/hint/show-hint.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/sql/sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/hint/show-hint.min.js"></script>
+
+<style>
+body { font-family:sans-serif; background:#111; color:#eee; padding:2rem; }
+
+.top-bar { display:flex; gap:10px; margin-bottom:10px; }
+
+.top-bar select, .top-bar input {
+  flex:1; padding:8px; background:#222; color:#eee;
+  border:none; border-radius:5px;
+}
+
+button {
+  padding:10px 15px;
+  border:none;
+  border-radius:5px;
+  cursor:pointer;
+  background:#333;
+  color:white;
+}
+
+#analyze-btn { background:#6366f1; }
+#refresh-btn { background:#10b981; }
+#show-schema-btn, .text-button {
+  background:transparent;
+  color:#fff;
+}
+
+.sql-error-line { background: rgba(248, 113, 113, 0.16) !important; }
+.sql-error-panel { display:none; margin-top:10px; border:1px solid #b91c1c; background:#1f1f1f; color:#f8d7da; }
+.sql-error-panel ul { margin:8px 0 0 18px; padding:0; }
+.sql-error-panel li { margin-bottom:4px; }
+
+#show-schema-btn:hover, .text-button:hover {
+  text-decoration:underline;
+}
+
+.button-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin-top:12px;
+}
+
+.left-buttons, .right-buttons {
+  display:flex;
+  gap:10px;
+}
+
+.CodeMirror {
+  height:140px;
+  border-radius:6px;
+  font-size:14px;
+}
+
+.panel {
+  margin-top:12px;
+  padding:12px;
+  background:#1a1a1a;
+  border-radius:6px;
+  font-family:monospace;
+}
+
+table { width:100%; border-collapse:collapse; }
+th, td { border:1px solid #555; padding:5px; }
+th { background:#333; }
+.schema-scroll { max-height:120px; height:120px; overflow-y:auto; margin-top:8px; border:1px solid #222; border-radius:6px; }
+.results-scroll { max-height:320px; height:320px; overflow-y:auto; margin-top:8px; border:1px solid #222; border-radius:6px; }
+.schema-scroll table, .results-scroll table { margin:0; }
+</style>
+</head>
+
+<body>
+
+<h2>SQL Analyzer</h2>
+
+<div class="top-bar">
+  <select id="db"></select>
+  <input id="search" placeholder="Search table...">
+  <select id="tables"></select>
+  <select id="history"><option>History</option></select>
+</div>
+
+<textarea id="sql"></textarea>
+<div id="sql-error-panel" class="panel sql-error-panel"></div>
+<br><br>
+
+<div class="button-row">
+  <div class="left-buttons">
+    <button id="analyze-btn">RUN</button>
+    <button id="refresh-btn">Refresh</button>
+  </div>
+  <div class="right-buttons">
+    <button id="show-schema-btn" type="button" class="text-button">Hide schema</button>
+  </div>
+</div>
+
+<h3>Schema Explorer</h3>
+<div id="schema" class="panel">Choose a table to inspect schema.</div>
+
+<h3>Results</h3>
+<div id="results" class="panel"></div>
+
+<h3>Intelligence</h3>
+<div id="intelligence" class="panel"></div>
+
+<h3>Performance</h3>
+<div id="performance" class="panel"></div>
+
+<script>
+
+function showDangerModal(sql){
+  return new Promise((resolve)=>{
+
+    const modal = document.getElementById("danger-modal");
+    const text = document.getElementById("danger-text");
+
+    const s = sql.toLowerCase();
+
+    let warning = "";
+
+    const match = sql.match(/from\s+(\w+)|into\s+(\w+)|update\s+(\w+)|table\s+(\w+)/i);
+    const table = match ? (match[1] || match[2] || match[3] || match[4]) : "";
+
+    if (s.includes("delete") && !s.includes("where")) {
+      warning = "⚠️ No WHERE clause → ALL rows will be deleted!";
+    }
+    else if (s.includes("update") && !s.includes("where")) {
+      warning = "⚠️ No WHERE clause → ALL rows will be updated!";
+    }
+    else if (s.includes("drop") || s.includes("truncate")) {
+      warning = "⚠️ This will permanently remove the table or data!";
+    }
+
+    text.innerHTML = `
+      <div style="margin-bottom:10px;color:#f87171;font-weight:bold;">
+        ${warning}
+      </div>
+      <div style="font-size:11px;color:#aaa;word-break:break-all;">
+        ${sql}
+      </div>
+    `;
+
+    modal.style.display = "flex";
+
+    document.getElementById("confirm-run").onclick = ()=>{
+      modal.style.display = "none";
+      resolve(true);
+    };
+
+    document.getElementById("cancel-run").onclick = ()=>{
+      modal.style.display = "none";
+      resolve(false);
+    };
+
+  });
+}
+
+function isDangerousQuery(sql) {
+  const s = sql.toLowerCase();
+  return (
+    (s.includes("delete") && !s.includes("where")) ||
+    (s.includes("update") && !s.includes("where")) ||
+    s.includes("drop") ||
+    s.includes("truncate")
+  );
+}
+
+let editor;
+let selectedDB = "";
+let selectedTable = "";
+let allTables = [];
+let history = [];
+let currentRunId = 0;
+let currentSchema = null;
+let tableSchemas = {};
+
+const SQL_KEYWORDS = [
+  'SELECT','FROM','WHERE','JOIN','INNER','LEFT','RIGHT','FULL','ON','GROUP','BY','ORDER','HAVING','LIMIT',
+  'INSERT','INTO','VALUES','UPDATE','SET','DELETE','CREATE','ALTER','DROP','TRUNCATE','TABLE','VIEW','INDEX',
+  'AND','OR','NOT','IN','IS','NULL','AS','DISTINCT','TOP','UNION','ALL','EXISTS','BETWEEN'
+];
+
+/* ---------- INIT ---------- */
+function initEditor() {
+  editor = CodeMirror.fromTextArea(
+    document.getElementById("sql"),
+    {
+      mode: "text/x-sql",
+      lineNumbers: true,
+      theme: "dracula",
+      extraKeys: { "Ctrl-Space": "autocomplete" }
+    }
+  );
+
+  editor.on("inputRead", function(cm, change) {
+    const char = change.text[0];
+    if (!char || !char.match(/[\w\.]/)) return;
+    CodeMirror.showHint(cm, sqlHint, { completeSingle: false });
+  });
+}
+
+function getSqlContext(editor) {
+  const cursor = editor.getCursor();
+  const line = editor.getLine(cursor.line).slice(0, cursor.ch);
+  return line
+    .replace(/[\(\),;]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w.toLowerCase());
+}
+
+function sqlHint(editor) {
+  const cursor = editor.getCursor();
+  const token = editor.getTokenAt(cursor);
+  const start = token.start;
+  const end = cursor.ch;
+  const currentWord = token.string.trim();
+  const context = getSqlContext(editor);
+  const prevWord = context[context.length - 1] || '';
+  const prevPrevWord = context[context.length - 2] || '';
+
+  const tableNames = allTables.map(t => t.name);
+  const columnNames = (tableSchemas[selectedTable]?.columns || [])
+    .map(c => c.COLUMN_NAME || c.column_name || c.Column_Name || '')
+    .filter(Boolean);
+
+  let suggestions = [];
+  const wordLower = currentWord.toLowerCase();
+
+  const tableTrigger = ['from','join','into','update','table','delete','truncate'];
+  const columnTrigger = ['select','where','and','or','on','set','order','group','having','by',','];
+
+  if (tableTrigger.includes(prevWord) || currentWord.includes('.')) {
+    suggestions = tableNames;
+  } else if (columnTrigger.includes(prevWord) || prevPrevWord === 'select' || prevWord === 'select') {
+    suggestions = [...columnNames, ...SQL_KEYWORDS];
+  } else {
+    suggestions = [...SQL_KEYWORDS, ...columnNames, ...tableNames];
+  }
+
+  suggestions = suggestions
+    .filter((item, idx, self) => item && self.indexOf(item) === idx)
+    .filter(item => item.toLowerCase().startsWith(wordLower));
+
+  if (suggestions.length === 0 && currentWord === '') {
+    suggestions = [...SQL_KEYWORDS, ...columnNames, ...tableNames];
+  }
+
+  return {
+    list: suggestions.map(word => ({ text: word, displayText: word })),
+    from: CodeMirror.Pos(cursor.line, start),
+    to: CodeMirror.Pos(cursor.line, end)
+  };
+}
+
+/* ---------- HISTORY ---------- */
+function addHistory(sql) {
+  if (!sql) return;
+  history.unshift(sql);
+  history = history.slice(0, 10);
+
+  const sel = document.getElementById("history");
+  sel.innerHTML = "<option>History</option>";
+
+  history.forEach(h => {
+    const opt = document.createElement("option");
+    opt.value = h;
+    opt.textContent = h.length > 40 ? h.substring(0,40)+"..." : h;
+    sel.appendChild(opt);
+  });
+}
+
+function loadHistory(v){
+  if(v && v !== "History") editor.setValue(v);
+}
+
+/* ---------- FETCH ---------- */
+async function safeFetch(url, options) {
+  try {
+    const res = await fetch(url, options);
+    return await res.json();
+  } catch (err) {
+    console.error("API error:", err);
+    return { rows: [], columns: [] };
+  }
+}
+
+async function parseSqlSyntax(sql, db) {
+  if (!sql || !sql.trim()) return { success: true };
+
+  const result = await safeFetch("/api/parse", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sql, db })
+  });
+
+  return result;
+}
+
+function normalize(data){
+  if (!data) return [];
+
+  if (Array.isArray(data)) return data;
+
+  if (data.recordset) return data.recordset;
+  if (data.rows) return data.rows;
+  if (data.data) return data.data;
+
+  return [];
+}
+
+function extractColumns(data, sql, rows) {
+
+  // 1. מהשרת
+  if (data && data.columns) {
+    return Array.isArray(data.columns)
+      ? data.columns
+      : Object.keys(data.columns);
+  }
+
+  // 2. מה־rows
+  if (rows.length > 0) {
+    return Object.keys(rows[0]);
+  }
+
+  // 3. מה־SQL
+  const match = sql.match(/select\s+(.*?)\s+from/i);
+  if (match) {
+
+    let cols = match[1]
+      .split(",")
+      .map(c => c.trim())
+      .map(c => c.replace(/as\s+\w+/i, "").trim());
+
+    // 🔥 FIX חשוב: אם זה SELECT *
+    if (cols.length === 1 && cols[0] === "*") {
+      return []; // אל תציג עמודה בכלל
+    }
+
+    return cols;
+  }
+
+  return [];
+}
+
+/* ---------- ANALYZE ---------- */
+function analyzeQuery(sql){
+  const s = sql.toLowerCase();
+
+  let risk = "🟢 Low risk";
+  let cost = "🟢 Low cost";
+  let riskLevel = "low";
+  let costLevel = "low";
+  const suggestions = [];
+  const details = [];
+
+  if (s.includes("select *")) {
+    cost = "🟡 Medium cost";
+    costLevel = "medium";
+    suggestions.push("Avoid SELECT *; specify only the columns you need.");
+  }
+
+  if (s.includes("delete") && !s.includes("where")) {
+    risk = "🔴 High risk";
+    riskLevel = "high";
+    suggestions.push("DELETE without WHERE may remove every row.");
+  }
+
+  if (s.includes("update") && !s.includes("where")) {
+    risk = "🔴 High risk";
+    riskLevel = "high";
+    suggestions.push("UPDATE without WHERE may modify every row.");
+  }
+
+  if (s.includes("drop") || s.includes("truncate")) {
+    risk = "🔴 High risk";
+    riskLevel = "high";
+    suggestions.push("This is a destructive DDL operation; verify the target table.");
+  }
+
+  if (s.includes("join") && !s.includes(" on ") && !s.includes(" using ")) {
+    if (riskLevel !== "high") {
+      risk = "🟡 Medium risk";
+      riskLevel = "medium";
+    }
+    details.push("JOIN without an explicit ON/USING clause may cause a Cartesian product.");
+  }
+
+  if (s.includes("order by") && !s.includes("top") && !s.includes("limit")) {
+    if (costLevel !== "high") {
+      cost = "🟡 Medium cost";
+      costLevel = "medium";
+    }
+    details.push("ORDER BY can be expensive on large result sets.");
+  }
+
+  if (s.includes("like") && s.includes("%")) {
+    if (costLevel !== "high") {
+      cost = "🟡 Medium cost";
+      costLevel = "medium";
+    }
+    details.push("Wildcard LIKE patterns may prevent index usage.");
+  }
+
+  if (s.includes("create table") || s.includes("alter table")) {
+    if (riskLevel !== "high") {
+      risk = "🟡 Medium risk";
+      riskLevel = "medium";
+    }
+    suggestions.push("Schema changes should be reviewed and tested before execution.");
+  }
+
+  if (suggestions.length === 0 && details.length === 0) {
+    suggestions.push("Query looks good, but always review indexes and filters on large tables.");
+  }
+
+  return { risk, cost, suggestions, details };
+}
+
+function renderIntelligence(analysis) {
+  const { risk, cost, suggestions, details } = analysis;
+  let html = "";
+
+  html += `<div style=\"display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;\">`;
+  html += `<span style=\"padding:10px 14px;border-radius:999px;background:${risk.startsWith('🔴') ? '#7f1d1d' : risk.startsWith('🟡') ? '#854d0e' : '#134e4a'};color:#fff;font-weight:700;\">${risk}</span>`;
+  html += `<span style=\"padding:10px 14px;border-radius:999px;background:${cost.startsWith('🔴') ? '#7f1d1d' : cost.startsWith('🟡') ? '#854d0e' : '#134e4a'};color:#fff;font-weight:700;\">${cost}</span>`;
+  html += `</div>`;
+
+  if (suggestions.length > 0) {
+    html += `<div style=\"margin-bottom:12px;\"><strong>Suggestions:</strong><ul style=\"margin:8px 0 0 18px;line-height:1.6;color:#ddd;\">`;
+    suggestions.forEach(s => {
+      html += `<li>${s}</li>`;
+    });
+    html += `</ul></div>`;
+  }
+
+  if (details.length > 0) {
+    html += `<div><strong>Notes:</strong><ul style=\"margin:8px 0 0 18px;line-height:1.6;color:#ccc;\">`;
+    details.forEach(d => {
+      html += `<li>${d}</li>`;
+    });
+    html += `</ul></div>`;
+  }
+
+  return html;
+}
+
+let schemaVisible = true;
+
+function renderPerformance(duration, rowsCount) {
+  return "";
+}
+
+function showSchema() {
+  const btn = document.getElementById("show-schema-btn");
+  const el = document.getElementById("schema");
+
+  if (!selectedDB || !selectedTable) {
+    el.style.display = "block";
+    el.innerHTML = "<div style='color:#aaa;'>Select a database and table first.</div>";
+    btn.textContent = "Show schema";
+    schemaVisible = false;
+    return;
+  }
+
+  schemaVisible = !schemaVisible;
+
+  if (!schemaVisible) {
+    btn.textContent = "Show schema";
+    el.style.display = "none";
+    return;
+  }
+
+  btn.textContent = "Hide schema";
+  el.style.display = "block";
+
+  if (tableSchemas[selectedTable]) {
+    currentSchema = tableSchemas[selectedTable];
+    renderSchema(currentSchema);
+  } else {
+    loadTableSchema(selectedDB, selectedTable);
+  }
+}
+
+/* ---------- DDL ---------- */
+function ddlMessage(sql, rows){
+
+  const s = sql.toLowerCase();
+
+  const tableMatch = sql.match(/from\s+(\w+)|into\s+(\w+)|table\s+(\w+)/i);
+  const table = tableMatch ? (tableMatch[1] || tableMatch[2] || tableMatch[3]) : "table";
+
+  if (s.startsWith("create")) return `Table ${table} created successfully`;
+  if (s.startsWith("insert")) return `${rows?.length || 0} rows inserted into ${table}`;
+  if (s.startsWith("update")) return `${rows?.length || 0} rows updated in ${table}`;
+  if (s.startsWith("delete")) return `${rows?.length || 0} rows deleted from ${table}`;
+  if (s.startsWith("drop")) return `Table ${table} removed successfully`;
+
+  return null;
+}
+
+/* ---------- DB ---------- */
+async function loadDB(){
+  const data = await safeFetch("/api/query",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      sql:"SELECT name FROM sys.databases",
+      db:"master"
+    })
+  });
+
+  let rows = normalize(data);
+
+/* 🧹 אם משהו לא תקין - נוודא ריק */
+if (!Array.isArray(rows)) {
+  rows = [];
+}
+
+  const db=document.getElementById("db");
+  db.innerHTML="<option value='' disabled selected>-- DB --</option>";
+
+  rows.forEach(r=>{
+    const dbName = r.name || r.NAME || r.Name || r.database_name || r.Database_Name;
+    if (!dbName) return;
+    const opt=document.createElement("option");
+    opt.value=dbName;
+    opt.textContent=dbName;
+    db.appendChild(opt);
+  });
+
+  if (rows.length) {
+    const dbSelect = document.getElementById("db");
+    if (selectedDB && rows.some(r => r.name === selectedDB)) {
+      dbSelect.value = selectedDB;
+    } else {
+      selectedDB = rows[0].name;
+      dbSelect.value = selectedDB;
+    }
+  }
+}
+
+/* ---------- TABLES ---------- */
+async function loadTables(dbName){
+
+  if(!dbName) return;
+
+  const data = await safeFetch("/api/query",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      sql:"SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE'",
+      db:dbName
+    })
+  });
+
+  const rows = normalize(data);
+
+  allTables = rows.map(r => ({
+    name: r.TABLE_NAME || r.table_name || r.Table_Name || r.tableName || r.TableName
+  })).filter(t => t.name);
+  renderTables();
+}
+
+function renderTables(filter = ""){
+  const sel=document.getElementById("tables");
+  sel.innerHTML="<option value='' disabled selected>-- Table --</option>";
+
+  const normalizedFilter = filter.toLowerCase();
+  const filtered = normalizedFilter
+    ? allTables.filter(t => t.name.toLowerCase().includes(normalizedFilter))
+    : allTables;
+
+  filtered.forEach(t=>{
+    const opt=document.createElement("option");
+    opt.value=t.name;
+    opt.textContent=t.name;
+    sel.appendChild(opt);
+  });
+}
+
+function escapeSqlString(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function renderSchema(schema) {
+  const el = document.getElementById("schema");
+
+  if (!schema || !schema.tableName) {
+    el.innerHTML = "<div style='color:#aaa;'>Choose a table to inspect schema.</div>";
+    return;
+  }
+
+  const columnsCount = schema.columns?.length || 0;
+  const keysCount = schema.keys?.length || 0;
+  const indexesCount = schema.indexes?.length || 0;
+  const keyColumns = (schema.keys || []).reduce((acc, k) => {
+    const columnName = (k.COLUMN_NAME || k.column_name || '').toString();
+    const constraintType = (k.CONSTRAINT_TYPE || k.constraint_type || '').toString().toUpperCase();
+    if (!columnName) return acc;
+    const labels = acc[columnName] || new Set();
+    if (constraintType.includes('PRIMARY')) labels.add('PK');
+    if (constraintType.includes('FOREIGN')) labels.add('FK');
+    if (!constraintType.includes('PRIMARY') && !constraintType.includes('FOREIGN') && constraintType) {
+      labels.add(constraintType);
+    }
+    acc[columnName] = labels;
+    return acc;
+  }, {});
+
+  let html = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;color:#ddd;font-size:13px;">
+      <span><strong>Table:</strong> ${schema.tableName}</span>
+      <span><strong>Columns:</strong> ${columnsCount}</span>
+      <span><strong>Keys:</strong> ${keysCount}</span>
+      <span><strong>Indexes:</strong> ${indexesCount}</span>
+    </div>
+  `;
+
+  if (columnsCount > 0) {
+    html += `
+      <div style="margin-bottom:14px;">
+        <strong>Columns</strong>
+        <table>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Max Length</th>
+            <th>Nullable</th>
+            <th>Default</th>
+          </tr>
+    `;
+
+    schema.columns.forEach(col => {
+      const columnName = col.COLUMN_NAME || col.column_name || col.Column_Name || '';
+      const labels = keyColumns[columnName] ? Array.from(keyColumns[columnName]).join(', ') : '';
+      html += `
+        <tr>
+          <td>${labels ? '🔑 ' : ''}${columnName}${labels ? ` <span style="color:#f59e0b;font-weight:700;">(${labels})</span>` : ''}</td>
+          <td>${col.DATA_TYPE || col.data_type || col.Data_Type || ''}</td>
+          <td>${col.CHARACTER_MAXIMUM_LENGTH ?? col.character_maximum_length ?? ''}</td>
+          <td>${col.IS_NULLABLE || col.is_nullable || ''}</td>
+          <td>${col.COLUMN_DEFAULT || col.column_default || col.Column_Default || ''}</td>
+        </tr>
+      `;
+    });
+
+    html += `</table></div>`;
+  } else {
+    html += `<div style="color:#aaa;margin-bottom:14px;">No columns found for this table.</div>`;
+  }
+
+  if (keysCount > 0) {
+    html += `
+      <div style="margin-bottom:14px;">
+        <strong>Keys</strong>
+        <table>
+          <tr>
+            <th>Constraint</th>
+            <th>Type</th>
+            <th>Column</th>
+          </tr>
+    `;
+
+    schema.keys.forEach(key => {
+      html += `
+        <tr>
+          <td>${key.CONSTRAINT_NAME || key.constraint_name || ''}</td>
+          <td>${key.CONSTRAINT_TYPE || key.constraint_type || ''}</td>
+          <td>${key.COLUMN_NAME || key.column_name || ''}</td>
+        </tr>
+      `;
+    });
+
+    html += `</table></div>`;
+  } else {
+    html += `<div style="color:#aaa;margin-bottom:14px;">No key constraints found for this table.</div>`;
+  }
+
+  if (indexesCount > 0) {
+    html += `
+      <div>
+        <strong>Indexes</strong>
+        <table>
+          <tr>
+            <th>Name</th>
+            <th>Unique</th>
+            <th>Primary</th>
+            <th>Column</th>
+          </tr>
+    `;
+
+    schema.indexes.forEach(idx => {
+      html += `
+        <tr>
+          <td>${idx.INDEX_NAME || idx.index_name || ''}</td>
+          <td>${idx.is_unique ? 'YES' : 'NO'}</td>
+          <td>${idx.is_primary_key ? 'YES' : 'NO'}</td>
+          <td>${idx.COLUMN_NAME || idx.column_name || ''}</td>
+        </tr>
+      `;
+    });
+
+    html += `</table></div>`;
+  } else {
+    html += `<div style="color:#aaa;">No indexes found for this table.</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+async function loadTableSchema(dbName, tableName) {
+  const el = document.getElementById("schema");
+
+  if (!dbName || !tableName) {
+    currentSchema = null;
+    return renderSchema(null);
+  }
+
+  if (tableSchemas[tableName]) {
+    currentSchema = tableSchemas[tableName];
+    return renderSchema(currentSchema);
+  }
+
+  el.innerHTML = `<div style="color:#aaa">Loading schema for <strong>${tableName}</strong>...</div>`;
+
+  const safeName = escapeSqlString(tableName);
+  const columnsSql = `
+    SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE, COLUMN_DEFAULT
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME = '${safeName}'
+    ORDER BY ORDINAL_POSITION`;
+
+  const keysSql = `
+    SELECT TC.CONSTRAINT_NAME, TC.CONSTRAINT_TYPE, KCU.COLUMN_NAME
+    FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS TC
+    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE KCU
+      ON TC.CONSTRAINT_NAME = KCU.CONSTRAINT_NAME
+      AND TC.TABLE_NAME = KCU.TABLE_NAME
+    WHERE TC.TABLE_NAME = '${safeName}'
+    ORDER BY TC.CONSTRAINT_NAME`;
+
+  const indexesSql = `
+    SELECT i.name AS INDEX_NAME,
+           i.is_unique,
+           i.is_primary_key,
+           COL_NAME(ic.object_id, ic.column_id) AS COLUMN_NAME
+    FROM sys.indexes i
+    JOIN sys.index_columns ic
+      ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+    JOIN sys.objects o
+      ON i.object_id = o.object_id
+    WHERE o.type = 'U'
+      AND o.name = '${safeName}'
+    ORDER BY i.name, ic.key_ordinal`;
+
+  try {
+    const [columnsData, keysData, indexesData] = await Promise.all([
+      safeFetch("/api/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: columnsSql, db: dbName })
+      }),
+      safeFetch("/api/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: keysSql, db: dbName })
+      }),
+      safeFetch("/api/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql: indexesSql, db: dbName })
+      })
+    ]);
+
+    const columns = normalize(columnsData);
+    const keys = normalize(keysData);
+    const indexes = normalize(indexesData);
+
+  tableSchemas[tableName] = { tableName, columns, keys, indexes };
+  currentSchema = tableSchemas[tableName];
+  renderSchema(currentSchema);
+  } catch (err) {
+    el.innerHTML = `<div style="color:#f87171;">Unable to load schema: ${err.message}</div>`;
+  }
+}
+
+/* ---------- RUN (CLEAN + STABLE + PERFORMANCE) ---------- */
+async function run({ silent = false } = {}) {
+
+  if (!editor) return;
+
+  const runId = ++currentRunId;
+
+  const sql = editor.getValue().trim();
+  if (!sql) return;
+
+  const canRun = isDangerousQuery(sql)
+    ? await showDangerModal(sql)
+    : true;
+
+  if (!canRun) return;
+
+  const analysis = analyzeQuery(sql);
+  document.getElementById("intelligence").innerHTML = renderIntelligence(analysis);
+  document.getElementById("performance").innerHTML = "";
+
+  addHistory(sql);
+
+  const el = document.getElementById("results");
+
+  /* 🧹 ניקוי מלא */
+  el.innerHTML = "";
+  el.innerHTML = `<div style="color:#aaa">⏳ Running query...</div>`;
+
+const startTime = performance.now();
+
+let data;
+
+try {
+  data = await safeFetch("/api/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sql, db: selectedDB })
+  });
+
+  /* 🚨 אם ריצה חדשה התחילה — עוצרים פה */
+  if (runId !== currentRunId) return;
+
+} catch (err) {
+  el.innerHTML = "❌ Server error while executing query";
+  return;
+}
+
+const endTime = performance.now();
+const duration = (endTime - startTime).toFixed(2);
+
+const rows = normalize(data) || [];
+
+  let html = "";
+
+  /* 📊 HEADER */
+  html += `
+    <div style="background:#111;padding:10px;margin-bottom:10px;border-radius:6px;color:#ddd;font-size:13px;">
+      ⏱ Execution Time: <b>${duration} ms</b> (${(duration/1000).toFixed(3)} sec)
+      <br>
+      Rows Returned: <b>${rows.length}</b>
+    </div>
+  `;
+
+  let msg = ddlMessage(sql, rows);
+  if (msg) {
+    html += `<div style="color:#10b981;font-weight:bold;margin-bottom:10px;">${msg}</div>`;
+  }
+html += `<div class="results-scroll"><table>`;
+
+// תמיד לחשב columns
+const cols = extractColumns(data, sql, rows);
+
+if (cols.length > 0) {
+
+  // header
+  html += "<tr>";
+  cols.forEach(c => html += `<th>${c}</th>`);
+  html += "</tr>";
+
+  // rows
+   if (rows.length > 0) {
+    rows.forEach(r => {
+      html += "<tr>";
+      cols.forEach(c => {
+        html += `<td>${r[c] ?? ""}</td>`;
+      });
+      html += "</tr>";
+    });
+  } else {
+    html += "<tr>";
+    cols.forEach(() => {
+      html += "<td>&nbsp;</td>";
+    });
+    html += "</tr>";
+  }
+
+} else {
+
+  // fallback אם אין columns בכלל
+  html += `
+    <tr>
+      <th>Result</th>
+    </tr>
+    <tr>
+      <td style="color:#888; text-align:center;">
+        (0 rows returned)
+      </td>
+    </tr>
+  `;
+}
+
+html += "</table></div>";
+
+el.innerHTML = html;
+}
+
+/* ---------- EVENTS ---------- */
+document.addEventListener("DOMContentLoaded",()=>{
+
+  document.getElementById("analyze-btn").onclick=run;
+  document.getElementById("show-schema-btn").onclick = showSchema;
+
+  document.getElementById("refresh-btn").onclick = async ()=>{
+
+    const dbSelect = document.getElementById("db");
+    const chosenDB = dbSelect.value;
+    if (chosenDB) {
+      selectedDB = chosenDB;
+    }
+
+    // ניקוי מסך
+    document.getElementById("results").innerHTML = "🔄 Refreshing...";
+document.getElementById("intelligence").innerHTML = "";
+document.getElementById("performance").innerHTML = "";
+
+// רענון DB
+await loadDB();
+
+const newDbValue = document.getElementById("db").value;
+if (newDbValue) {
+  selectedDB = newDbValue;
+}
+
+// רענון טבלאות
+if (selectedDB) {
+  await loadTables(selectedDB);
+}
+
+const sql = editor.getValue().trim();
+
+// הרצה מחדש רק אם יש שאילתה
+if(sql){
+  await run({ silent: true });
+}
+
+};
+
+  document.getElementById("db").onchange=e=>{
+    selectedDB=e.target.value;
+    currentSchema = null;
+    renderSchema(null);
+    loadTables(selectedDB);
+  };
+
+  document.getElementById("search").oninput=e=>{
+    renderTables(e.target.value);
+  };
+
+  document.getElementById("tables").onchange=e=>{
+    selectedTable = e.target.value;
+    editor.setValue(`SELECT * FROM ${selectedTable}`);
+    loadTableSchema(selectedDB, selectedTable);
+  };
+
+  document.getElementById("history").onchange=e=>{
+    loadHistory(e.target.value);
+  };
+
+  initEditor();
+
+  renderSchema(null);
+
+  editor.on("change", function(){
+    clearTimeout(lintTimeout);
+    lintTimeout = setTimeout(() => {
+      lintSQL();
+    }, 200);
+  });
+
+  loadDB();
+});
+
+let lintTimeout;
+
+async function lintSQL(){
+  const sql = editor.getValue();
+  const doc = editor.getDoc();
+
+  // קודם מנקים סימונים קודמים
+  editor.getAllMarks().forEach(m => m.clear());
+
+  const s = sql.toLowerCase();
+
+  // SELECT *
+  const selectStarRegex = /\bselect\s+\*/gi;
+  let match;
+
+  while ((match = selectStarRegex.exec(sql)) !== null) {
+    const from = editor.posFromIndex(match.index);
+    const to = editor.posFromIndex(match.index + match[0].length);
+
+    editor.markText(from, to, {
+      css: "background-color: rgba(245, 158, 11, 0.3);"
+    });
+  }
+
+  // DELETE בלי WHERE
+  if (s.includes("delete") && !s.includes("where")) {
+    highlightKeyword("delete", "rgba(239, 68, 68, 0.3)");
+  }
+
+  // UPDATE בלי WHERE
+  if (s.includes("update") && !s.includes("where")) {
+    highlightKeyword("update", "rgba(239, 68, 68, 0.3)");
+  }
+
+  const parseResult = await parseSqlSyntax(sql, selectedDB);
+  const errors = [];
+
+  if (parseResult && parseResult.success === false) {
+    errors.push({ line: parseResult.line || 0, message: parseResult.error });
+  } else {
+    const localErrors = validateSqlSyntax(sql);
+    errors.push(...localErrors);
+  }
+
+  showSqlErrors(errors);
+}
+
+function validateSqlSyntax(sql) {
+  const errors = [];
+  const lines = sql.split(/\r?\n/);
+  const parenStack = [];
+  let currentQuote = null;
+  let quoteLine = 0;
+  let escaped = false;
+
+  lines.forEach((line, lineIndex) => {
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (currentQuote) {
+        if (ch === currentQuote && !escaped) {
+          currentQuote = null;
+        }
+        escaped = ch === "\\" && !escaped;
+      } else {
+        if (ch === '"' || ch === "'") {
+          currentQuote = ch;
+          quoteLine = lineIndex;
+        } else if (ch === '(') {
+          parenStack.push({ line: lineIndex });
+        } else if (ch === ')') {
+          if (parenStack.length === 0) {
+            errors.push({ line: lineIndex, message: 'Unmatched closing parenthesis' });
+          } else {
+            parenStack.pop();
+          }
+        }
+      }
+    }
+  });
+
+  if (currentQuote) {
+    errors.push({ line: quoteLine, message: `Unclosed ${currentQuote} quote` });
+  }
+
+  if (parenStack.length > 0) {
+    const open = parenStack[parenStack.length - 1];
+    errors.push({ line: open.line, message: 'Unclosed opening parenthesis' });
+  }
+
+  return errors;
+}
+
+function showSqlErrors(errors) {
+  const panel = document.getElementById("sql-error-panel");
+  const doc = editor.getDoc();
+  clearSqlErrorMarks();
+
+  if (!errors.length) {
+    panel.style.display = "none";
+    panel.innerHTML = "";
+    return;
+  }
+
+  panel.style.display = "block";
+  panel.innerHTML = `
+    <strong>SQL syntax issue${errors.length > 1 ? 's' : ''}:</strong>
+    <ul>${errors.map(e => `<li>Line ${e.line + 1}:<pre>${escapeHtml(e.message)}</pre></li>`).join('')}</ul>
+  `;
+
+  errors.forEach(err => {
+    if (typeof err.line === 'number' && err.line >= 0) {
+      editor.addLineClass(err.line, "background", "sql-error-line");
+    }
+  });
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function clearSqlErrorMarks() {
+  const doc = editor.getDoc();
+  for (let i = 0; i < doc.lineCount(); i++) {
+    editor.removeLineClass(i, "background", "sql-error-line");
+  }
+}
+
+function highlightKeyword(keyword, color){
+  const sql = editor.getValue().toLowerCase();
+
+  let index = sql.indexOf(keyword);
+
+  if(index === -1) return;
+
+  const from = editor.posFromIndex(index);
+  const to = editor.posFromIndex(index + keyword.length);
+
+  editor.markText(from, to, {
+    css: `background-color: ${color};`
+  });
+}
+
+</script>
+
+<div id="danger-modal" style="
+  display:none;
+  position:fixed;
+  top:0; left:0;
+  width:100%; height:100%;
+  background:rgba(0,0,0,0.7);
+  align-items:center;
+  justify-content:center;
+  z-index:999;
+">
+  <div style="
+    background:#1f1f1f;
+    padding:20px;
+    border-radius:10px;
+    width:400px;
+    text-align:center;
+    box-shadow:0 0 20px rgba(0,0,0,0.5);
+  ">
+    <h3 style="color:#f87171;">⚠️ Dangerous Query</h3>
+    <p id="danger-text" style="font-size:12px; color:#ccc;"></p>
+
+    <div style="margin-top:15px;">
+      <button id="confirm-run" style="background:#ef4444;">Run Anyway</button>
+      <button id="cancel-run" style="background:#555;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
+

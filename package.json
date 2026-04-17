@@ -1,0 +1,19 @@
+{
+  "name": "sql-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SQL analyzer static app with Express",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.22.1",
+    "msnodesqlv8": "^5.1.8",
+    "mssql": "^11.0.1"
+  }
+}
