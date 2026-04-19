@@ -90,32 +90,6 @@ body {
   border-color: rgba(229,9,20,.8);
 }
 
-.optimize-input {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 1.5rem;
-}
-
-.optimize-input textarea {
-  min-height: 120px;
-  border-radius: 12px;
-  background: #111;
-  color: #fff;
-  border: 1px solid rgba(255,255,255,0.08);
-  padding: 12px;
-  font-family: monospace;
-  font-size: 0.9rem;
-  outline: none;
-  resize: vertical;
-}
-
-.optimize-input button {
-  align-self: flex-start;
-  background: #e50914;
-  color: #fff;
-}
-
 button {
   display: inline-flex;
   align-items: center;
@@ -140,7 +114,7 @@ button:hover {
   color: #fff;
 }
 
-#refresh-btn {
+#optimize-btn {
   background: rgba(255,255,255,0.08);
   color: #fff;
 }
@@ -282,7 +256,7 @@ th {
 <div class="button-row">
   <div class="left-buttons">
     <button id="analyze-btn">RUN</button>
-    <button id="refresh-btn">Refresh</button>
+    <button id="optimize-btn">Optimize Query</button>
   </div>
   <div class="right-buttons">
     <button id="show-schema-btn" type="button" class="text-button">Hide schema</button>
@@ -297,11 +271,6 @@ th {
 
 <h3>Intelligence</h3>
 <div id="intelligence" class="panel"></div>
-
-<div class="optimize-input">
-  <textarea id="optimize-sql" placeholder="Enter SQL query to optimize..."></textarea>
-  <button id="optimize-btn">Optimize</button>
-</div>
 
 <h3>Optimize Query</h3>
 <div id="optimize" class="panel">
@@ -776,11 +745,11 @@ function escapeSqlString(value) {
 }
 
 async function optimizeQuery() {
-  const sql = document.getElementById("optimize-sql").value.trim();
+  const sql = document.getElementById("sql").value.trim();
   const resultEl = document.getElementById("optimize-result");
 
   if (!sql) {
-    resultEl.innerHTML = "<div style='color:#f87171;'>Please enter a SQL query to optimize.</div>";
+    resultEl.innerHTML = "<div style='color:#f87171;'>Please enter a SQL query in the main editor above.</div>";
     return;
   }
 
