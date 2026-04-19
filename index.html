@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="he" dir="rtl">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SQL Analyzer</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DBA Dashboard</title>
 
 <link rel="stylesheet" href="/node_modules/codemirror/lib/codemirror.css">
 <link rel="stylesheet" href="/node_modules/codemirror/addon/hint/show-hint.css">
@@ -28,9 +28,9 @@
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-  background: #000000;
-  color: #fff;
+  font-family: Arial;
+  background-color: #f4f4f4;
+  color: #000;
 }
 
 .page-inner {
@@ -232,6 +232,13 @@ th {
 .results-scroll table {
   margin: 0;
 }
+
+.dashboard { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; padding: 20px; }
+.card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+.status-up { color: green; font-weight: bold; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: right; padding: 8px; border-bottom: 1px solid #ddd; }
+
 </style>
 </head>
 
