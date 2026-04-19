@@ -5,13 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SQL Analyzer</title>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/hint/show-hint.min.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
+<link rel="stylesheet" href="/node_modules/codemirror/lib/codemirror.css">
+<link rel="stylesheet" href="/node_modules/codemirror/addon/hint/show-hint.css">
+<link rel="stylesheet" href="/node_modules/codemirror/theme/dracula.css">
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/sql/sql.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/hint/show-hint.min.js"></script>
+<script src="/node_modules/codemirror/lib/codemirror.js"></script>
+<script src="/node_modules/codemirror/mode/sql/sql.js"></script>
+<script src="/node_modules/codemirror/addon/hint/show-hint.js"></script>
+<script src="/node_modules/codemirror/addon/hint/sql-hint.js"></script>
 
 <style>
 :root {
@@ -344,21 +345,30 @@ const SQL_KEYWORDS = [
 
 /* ---------- INIT ---------- */
 function initEditor() {
-  editor = CodeMirror.fromTextArea(
-    document.getElementById("sql"),
-    {
+  try {
+    console.log("Initializing editor");
+    const textarea = document.getElementById("sql");
+    console.log("Textarea:", textarea);
+    if (!textarea) {
+      console.error("Textarea not found");
+      return;
+    }
+    editor = CodeMirror.fromTextArea(textarea, {
       mode: "text/x-sql",
       lineNumbers: true,
       theme: "dracula",
       extraKeys: { "Ctrl-Space": "autocomplete" }
-    }
-  );
+    });
+    console.log("Editor initialized:", editor);
 
-  editor.on("inputRead", function(cm, change) {
-    const char = change.text[0];
-    if (!char || !char.match(/[\w\.]/)) return;
-    CodeMirror.showHint(cm, sqlHint, { completeSingle: false });
-  });
+    editor.on("inputRead", function(cm, change) {
+      const char = change.text[0];
+      if (!char || !char.match(/[\w\.]/)) return;
+      CodeMirror.showHint(cm, CodeMirror.hint.sql, { completeSingle: false });
+    });
+  } catch (error) {
+    console.error("Error initializing editor:", error);
+  }
 }
 
 function getSqlContext(editor) {
@@ -370,50 +380,6 @@ function getSqlContext(editor) {
     .split(/\s+/)
     .filter(Boolean)
     .map(w => w.toLowerCase());
-}
-
-function sqlHint(editor) {
-  const cursor = editor.getCursor();
-  const token = editor.getTokenAt(cursor);
-  const start = token.start;
-  const end = cursor.ch;
-  const currentWord = token.string.trim();
-  const context = getSqlContext(editor);
-  const prevWord = context[context.length - 1] || '';
-  const prevPrevWord = context[context.length - 2] || '';
-
-  const tableNames = allTables.map(t => t.name);
-  const columnNames = (tableSchemas[selectedTable]?.columns || [])
-    .map(c => c.COLUMN_NAME || c.column_name || c.Column_Name || '')
-    .filter(Boolean);
-
-  let suggestions = [];
-  const wordLower = currentWord.toLowerCase();
-
-  const tableTrigger = ['from','join','into','update','table','delete','truncate'];
-  const columnTrigger = ['select','where','and','or','on','set','order','group','having','by',','];
-
-  if (tableTrigger.includes(prevWord) || currentWord.includes('.')) {
-    suggestions = tableNames;
-  } else if (columnTrigger.includes(prevWord) || prevPrevWord === 'select' || prevWord === 'select') {
-    suggestions = [...columnNames, ...SQL_KEYWORDS];
-  } else {
-    suggestions = [...SQL_KEYWORDS, ...columnNames, ...tableNames];
-  }
-
-  suggestions = suggestions
-    .filter((item, idx, self) => item && self.indexOf(item) === idx)
-    .filter(item => item.toLowerCase().startsWith(wordLower));
-
-  if (suggestions.length === 0 && currentWord === '') {
-    suggestions = [...SQL_KEYWORDS, ...columnNames, ...tableNames];
-  }
-
-  return {
-    list: suggestions.map(word => ({ text: word, displayText: word })),
-    from: CodeMirror.Pos(cursor.line, start),
-    to: CodeMirror.Pos(cursor.line, end)
-  };
 }
 
 /* ---------- HISTORY ---------- */
@@ -950,13 +916,22 @@ async function loadTableSchema(dbName, tableName) {
 
 /* ---------- RUN (CLEAN + STABLE + PERFORMANCE) ---------- */
 async function run({ silent = false } = {}) {
+  console.log("Run button clicked");
 
-  if (!editor) return;
+  if (!editor) {
+    console.log("Editor not initialized");
+    return;
+  }
 
   const runId = ++currentRunId;
 
   const sql = editor.getValue().trim();
-  if (!sql) return;
+  console.log("SQL:", sql);
+  console.log("Selected DB:", selectedDB);
+  if (!sql) {
+    console.log("No SQL");
+    return;
+  }
 
   const canRun = isDangerousQuery(sql)
     ? await showDangerModal(sql)
@@ -986,6 +961,7 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sql, db: selectedDB })
   });
+  console.log("Data received:", data);
 
   /* 🚨 אם ריצה חדשה התחילה — עוצרים פה */
   if (runId !== currentRunId) return;

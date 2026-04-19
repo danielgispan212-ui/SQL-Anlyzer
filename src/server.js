@@ -148,6 +148,9 @@ app.post('/api/plan', async (req, res) => {
 // static files from public folder
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
+// static files from node_modules
+app.use('/node_modules', express.static(path.join(__dirname, '..', 'node_modules')));
+
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });

@@ -12,6 +12,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "codemirror": "^5.65.13",
     "express": "^4.22.1",
     "msnodesqlv8": "^5.1.8",
     "mssql": "^11.0.1"
