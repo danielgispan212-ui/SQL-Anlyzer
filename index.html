@@ -119,11 +119,6 @@ button:hover {
   color: #fff;
 }
 
-#optimize-btn {
-  background: rgba(255,255,255,0.08);
-  color: #fff;
-}
-
 #show-schema-btn, .text-button {
   background: transparent;
   color: #fff;
@@ -262,7 +257,6 @@ th {
   <div class="left-buttons">
     <button id="analyze-btn">RUN</button>
     <button id="refresh-btn">Refresh</button>
-    <button id="optimize-btn">Optimize Query</button>
   </div>
   <div class="right-buttons">
     <button id="show-schema-btn" type="button" class="text-button">Hide schema</button>
@@ -277,11 +271,6 @@ th {
 
 <h3>Intelligence</h3>
 <div id="intelligence" class="panel"></div>
-
-<h3>Optimize Query</h3>
-<div id="optimize" class="panel">
-  <div id="optimize-result"></div>
-</div>
 </div>
 
 <script>
@@ -750,42 +739,6 @@ function escapeSqlString(value) {
   return String(value).replace(/'/g, "''");
 }
 
-async function optimizeQuery() {
-  const sql = document.getElementById("sql").value.trim();
-  const resultEl = document.getElementById("optimize-result");
-
-  if (!sql) {
-    resultEl.innerHTML = "<div style='color:#f87171;'>Please enter a SQL query in the main editor above.</div>";
-    return;
-  }
-
-  resultEl.innerHTML = "🔄 Analyzing query execution plan...";
-
-  try {
-    const response = await fetch('/api/plan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sql })
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-      // Display the execution plan XML in a readable format
-      const planXml = data.planXml;
-      resultEl.innerHTML = `
-        <h4>Execution Plan:</h4>
-        <pre style="background:#111; color:#fff; padding:10px; border-radius:8px; overflow-x:auto;">${JSON.stringify(planXml, null, 2)}</pre>
-        <p style="color:#aaa; font-size:0.9em;">This is the XML execution plan. For detailed analysis, consider using SQL Server Management Studio.</p>
-      `;
-    } else {
-      resultEl.innerHTML = `<div style='color:#f87171;'>Error: ${data.error}</div>`;
-    }
-  } catch (err) {
-    resultEl.innerHTML = `<div style='color:#f87171;'>Network error: ${err.message}</div>`;
-  }
-}
-
 function renderSchema(schema) {
   const el = document.getElementById("schema");
 
@@ -1108,7 +1061,6 @@ document.addEventListener("DOMContentLoaded",()=>{
 
   document.getElementById("analyze-btn").onclick=run;
   document.getElementById("show-schema-btn").onclick = showSchema;
-  document.getElementById("optimize-btn").onclick = optimizeQuery;
 
   document.getElementById("refresh-btn").onclick = async ()=>{
 
