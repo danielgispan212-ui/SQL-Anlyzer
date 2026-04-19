@@ -118,8 +118,12 @@ th { background:#333; }
 <h3>Intelligence</h3>
 <div id="intelligence" class="panel"></div>
 
-<h3>Performance</h3>
-<div id="performance" class="panel"></div>
+<h3>Optimize Query</h3>
+<div id="optimize" class="panel">
+  <textarea id="optimize-sql" placeholder="Enter SQL query to optimize..."></textarea>
+  <button id="optimize-btn">Optimize</button>
+  <div id="optimize-result"></div>
+</div>
 
 <script>
 
@@ -922,6 +926,7 @@ document.addEventListener("DOMContentLoaded",()=>{
 
   document.getElementById("analyze-btn").onclick=run;
   document.getElementById("show-schema-btn").onclick = showSchema;
+  document.getElementById("optimize-btn").onclick = optimizeQuery;
 
   document.getElementById("refresh-btn").onclick = async ()=>{
 
