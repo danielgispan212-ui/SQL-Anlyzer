@@ -90,6 +90,32 @@ body {
   border-color: rgba(229,9,20,.8);
 }
 
+.optimize-input {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 1.5rem;
+}
+
+.optimize-input textarea {
+  min-height: 120px;
+  border-radius: 12px;
+  background: #111;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 12px;
+  font-family: monospace;
+  font-size: 0.9rem;
+  outline: none;
+  resize: vertical;
+}
+
+.optimize-input button {
+  align-self: flex-start;
+  background: #e50914;
+  color: #fff;
+}
+
 button {
   display: inline-flex;
   align-items: center;
@@ -272,10 +298,13 @@ th {
 <h3>Intelligence</h3>
 <div id="intelligence" class="panel"></div>
 
-<h3>Optimize Query</h3>
-<div id="optimize" class="panel">
+<div class="optimize-input">
   <textarea id="optimize-sql" placeholder="Enter SQL query to optimize..."></textarea>
   <button id="optimize-btn">Optimize</button>
+</div>
+
+<h3>Optimize Query</h3>
+<div id="optimize" class="panel">
   <div id="optimize-result"></div>
 </div>
 </div>
@@ -746,6 +775,42 @@ function escapeSqlString(value) {
   return String(value).replace(/'/g, "''");
 }
 
+async function optimizeQuery() {
+  const sql = document.getElementById("optimize-sql").value.trim();
+  const resultEl = document.getElementById("optimize-result");
+
+  if (!sql) {
+    resultEl.innerHTML = "<div style='color:#f87171;'>Please enter a SQL query to optimize.</div>";
+    return;
+  }
+
+  resultEl.innerHTML = "🔄 Analyzing query execution plan...";
+
+  try {
+    const response = await fetch('/api/plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql })
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      // Display the execution plan XML in a readable format
+      const planXml = data.planXml;
+      resultEl.innerHTML = `
+        <h4>Execution Plan:</h4>
+        <pre style="background:#111; color:#fff; padding:10px; border-radius:8px; overflow-x:auto;">${JSON.stringify(planXml, null, 2)}</pre>
+        <p style="color:#aaa; font-size:0.9em;">This is the XML execution plan. For detailed analysis, consider using SQL Server Management Studio.</p>
+      `;
+    } else {
+      resultEl.innerHTML = `<div style='color:#f87171;'>Error: ${data.error}</div>`;
+    }
+  } catch (err) {
+    resultEl.innerHTML = `<div style='color:#f87171;'>Network error: ${err.message}</div>`;
+  }
+}
+
 function renderSchema(schema) {
   const el = document.getElementById("schema");
 
@@ -1068,6 +1133,7 @@ document.addEventListener("DOMContentLoaded",()=>{
 
   document.getElementById("analyze-btn").onclick=run;
   document.getElementById("show-schema-btn").onclick = showSchema;
+  document.getElementById("optimize-btn").onclick = optimizeQuery;
 
   document.getElementById("refresh-btn").onclick = async ()=>{
 
