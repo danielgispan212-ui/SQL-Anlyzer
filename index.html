@@ -272,6 +272,9 @@ th {
 
 <h3>Intelligence</h3>
 <div id="intelligence" class="panel"></div>
+
+<h3>Performance</h3>
+<div id="performance" class="panel"></div>
 </div>
 
 <script>
@@ -932,12 +935,18 @@ async function run({ silent = false } = {}) {
   if (!canRun) return;
 
   const analysis = analyzeQuery(sql);
-  document.getElementById("intelligence").innerHTML = renderIntelligence(analysis);
-  document.getElementById("performance").innerHTML = "";
+  const intelligenceEl = document.getElementById("intelligence");
+  if (intelligenceEl) intelligenceEl.innerHTML = renderIntelligence(analysis);
+  const performanceEl = document.getElementById("performance");
+  if (performanceEl) performanceEl.innerHTML = "";
 
   addHistory(sql);
 
   const el = document.getElementById("results");
+  if (!el) {
+    console.error("Results element not found");
+    return;
+  }
 
   /* 🧹 ניקוי מלא */
   el.innerHTML = "";
@@ -1048,8 +1057,10 @@ document.addEventListener("DOMContentLoaded",()=>{
 
     // ניקוי מסך
     document.getElementById("results").innerHTML = "🔄 Refreshing...";
-document.getElementById("intelligence").innerHTML = "";
-document.getElementById("performance").innerHTML = "";
+    const intelligenceEl = document.getElementById("intelligence");
+    if (intelligenceEl) intelligenceEl.innerHTML = "";
+    const performanceEl = document.getElementById("performance");
+    if (performanceEl) performanceEl.innerHTML = "";
 
 // רענון DB
 await loadDB();
